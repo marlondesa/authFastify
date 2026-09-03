@@ -44,6 +44,19 @@ export const verifyEmailBodySchema = z.object({
 export const resendVerificationBodySchema = z.object({
     email: emailSchema,
 });
+// Schema para solicitar recuperação de senha
+export const forgotPasswordBodySchema = z.object({
+    email: emailSchema,
+});
+// Schema para redefinir senha com token
+export const resetPasswordBodySchema = z.object({
+    token: z.string().min(1, 'Token é obrigatório'),
+    password: strongPasswordSchema,
+    confirmPassword: z.string(),
+}).refine((data) => data.password === data.confirmPassword, {
+    message: 'As senhas não coincidem',
+    path: ['confirmPassword'],
+});
 // Schema para os parâmetros da rota que busca um usuário por ID
 export const paramsIdSchema = z.object({
     id: z.string().uuid('ID inválido'),
@@ -98,6 +111,8 @@ export const userSchema = {
     updateBody: updateBodySchema,
     verifyEmailBody: verifyEmailBodySchema,
     resendVerificationBody: resendVerificationBodySchema,
+    forgotPasswordBody: forgotPasswordBodySchema,
+    resetPasswordBody: resetPasswordBodySchema,
     paramsId: paramsIdSchema,
     publicUserResponse: publicUserResponseSchema,
     loginResponse: loginResponseSchema,

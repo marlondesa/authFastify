@@ -35,6 +35,28 @@ export async function authRoutes(app) {
             },
         },
     }, userController.resendVerificationController);
+    app.post('/forgot-password', {
+        config: { rateLimit: rateLimitConfig.resendVerification },
+        schema: {
+            tags: ['Auth'],
+            description: 'Endpoint para solicitar recuperação de senha',
+            body: userSchema.forgotPasswordBody,
+            response: {
+                200: userSchema.errorResponse,
+            },
+        },
+    }, userController.forgotPasswordController);
+    app.post('/reset-password', {
+        config: { rateLimit: rateLimitConfig.verifyEmail },
+        schema: {
+            tags: ['Auth'],
+            description: 'Endpoint para redefinir senha com token',
+            body: userSchema.resetPasswordBody,
+            response: {
+                200: userSchema.errorResponse,
+            },
+        },
+    }, userController.resetPasswordController);
     app.post('/login', {
         config: { rateLimit: rateLimitConfig.login },
         schema: {

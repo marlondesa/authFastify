@@ -53,6 +53,36 @@ export async function setEmailVerifyToken(id, token, expiresAt) {
         },
     });
 }
+// Define token de recuperação de senha
+export async function setPasswordResetToken(id, token, expiresAt) {
+    return await prisma.user.update({
+        where: { id },
+        data: {
+            passwordResetToken: token,
+            passwordResetExpiresAt: expiresAt,
+        },
+    });
+}
+// Busca usuário ativo pelo token de recuperação de senha
+export async function getUserByPasswordResetToken(token) {
+    return await prisma.user.findFirst({
+        where: {
+            passwordResetToken: token,
+            deletedAt: null,
+        },
+    });
+}
+// Atualiza a senha e limpa o token de recuperação
+export async function resetPassword(id, hashedPassword) {
+    return await prisma.user.update({
+        where: { id },
+        data: {
+            password: hashedPassword,
+            passwordResetToken: null,
+            passwordResetExpiresAt: null,
+        },
+    });
+}
 // Atualiza o usuário pelo ID
 export async function updateUser(id, data) {
     return await prisma.user.update({
@@ -70,6 +100,8 @@ export async function softDeleteUser(id) {
             email: `${id}@deleted.local`,
             emailVerifyToken: null,
             emailVerifyTokenExpiresAt: null,
+            passwordResetToken: null,
+            passwordResetExpiresAt: null,
         },
     });
 }
@@ -157,6 +189,9 @@ export const authRepository = {
     getUserByEmailVerifyToken,
     verifyUserEmail,
     setEmailVerifyToken,
+    setPasswordResetToken,
+    getUserByPasswordResetToken,
+    resetPassword,
     updateUser,
     softDeleteUser,
     createRefreshToken,

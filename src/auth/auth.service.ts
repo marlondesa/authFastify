@@ -4,7 +4,7 @@ import { nanoid } from 'nanoid';
 import { generateAccessToken, getRefreshTokenExpiresAt } from '../config/jwt.js';
 import { hashPassword, verifyPassword, hashToken } from '../utils/hash.js';
 import { logger } from '../utils/logger.js';
-import { sendVerificationEmail } from '../email/email.service.js';
+import { sendVerificationEmail, sendPasswordResetEmail } from '../email/email.service.js';
 import { BadRequestError, ForbiddenError, NotFoundError, UnauthorizedError } from '../errors/AppError.js';
 
 function sanitizeUser(user: {
@@ -118,6 +118,54 @@ export async function resendEmailVerification(email: string) {
     }
 
     return { message: 'Se o email existir e não estiver verificado, um novo token foi enviado' };
+}
+
+// Função para solicitar recuperação de senha
+export async function forgotPassword(email: string) {
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await authRepository.getUserByEmail(normalizedEmail);
+
+    if (!user || user.deletedAt) {
+        // Retorna sucesso genérico para não enumerar emails
+        return { message: 'Se o email existir, um link de recuperação foi enviado' };
+    }
+
+    const token = nanoid(32);
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
+
+    await authRepository.setPasswordResetToken(user.id, token, expiresAt);
+
+    logger.info({ userId: user.id }, 'Token de recuperação de senha gerado');
+
+    try {
+        await sendPasswordResetEmail(normalizedEmail, token);
+    } catch {
+        logger.error({ userId: user.id, email: normalizedEmail }, 'Falha no envio do email de recuperação de senha');
+    }
+
+    return { message: 'Se o email existir, um link de recuperação foi enviado' };
+}
+
+// Função para redefinir senha usando token
+export async function resetPassword(token: string, newPassword: string) {
+    const user = await authRepository.getUserByPasswordResetToken(token);
+
+    if (!user || user.deletedAt) {
+        throw new BadRequestError('Token de recuperação inválido');
+    }
+
+    if (!user.passwordResetExpiresAt || user.passwordResetExpiresAt < new Date()) {
+        throw new BadRequestError('Token de recuperação expirado');
+    }
+
+    const hashedPassword = await hashPassword(newPassword);
+
+    await authRepository.resetPassword(user.id, hashedPassword);
+    await authRepository.deleteAllUserRefreshTokens(user.id);
+
+    logger.info({ userId: user.id }, 'Senha redefinida; todas as sessões revogadas');
+
+    return { message: 'Senha redefinida com sucesso' };
 }
 
 // Função para autenticar um usuário existente
@@ -338,6 +386,8 @@ export const authService = {
     registerUser,
     verifyEmail,
     resendEmailVerification,
+    forgotPassword,
+    resetPassword,
     loginUser,
     refreshAccessToken,
     logout,

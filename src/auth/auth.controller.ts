@@ -133,6 +133,30 @@ export async function resendVerificationController(
     return reply.send(result);
 }
 
+// Função para solicitar recuperação de senha
+export async function forgotPasswordController(
+    request: FastifyRequest,
+    reply: FastifyReply
+) {
+    const { email } = request.body as { email: string };
+
+    const result = await authService.forgotPassword(email);
+
+    return reply.send(result);
+}
+
+// Função para redefinir senha com token
+export async function resetPasswordController(
+    request: FastifyRequest,
+    reply: FastifyReply
+) {
+    const { token, password } = request.body as { token: string; password: string };
+
+    const result = await authService.resetPassword(token, password);
+
+    return reply.send(result);
+}
+
 // Função para buscar o usuário logado
 export async function meController(
     request: FastifyRequest,
@@ -221,6 +245,8 @@ export const userController = {
     registerController,
     verifyEmailController,
     resendVerificationController,
+    forgotPasswordController,
+    resetPasswordController,
     loginController,
     refreshController,
     logoutController,

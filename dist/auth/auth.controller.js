@@ -79,6 +79,18 @@ export async function resendVerificationController(request, reply) {
     const result = await authService.resendEmailVerification(email);
     return reply.send(result);
 }
+// Função para solicitar recuperação de senha
+export async function forgotPasswordController(request, reply) {
+    const { email } = request.body;
+    const result = await authService.forgotPassword(email);
+    return reply.send(result);
+}
+// Função para redefinir senha com token
+export async function resetPasswordController(request, reply) {
+    const { token, password } = request.body;
+    const result = await authService.resetPassword(token, password);
+    return reply.send(result);
+}
 // Função para buscar o usuário logado
 export async function meController(request, reply) {
     const user = await authService.getUserById(request.user.id);
@@ -124,6 +136,8 @@ export const userController = {
     registerController,
     verifyEmailController,
     resendVerificationController,
+    forgotPasswordController,
+    resetPasswordController,
     loginController,
     refreshController,
     logoutController,
