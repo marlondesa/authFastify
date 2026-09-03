@@ -1,7 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma.js';
 
 // Busca usuário ativo pelo email
 export async function getUserByEmail(email: string) {
@@ -9,7 +6,6 @@ export async function getUserByEmail(email: string) {
         where: { email, deletedAt: null },
     });
 }
-
 
 // Busca usuário ativo pelo ID
 export async function getUserById(id: string) {
@@ -23,12 +19,49 @@ export async function createUser(data: {
     name: string;
     email: string;
     password: string;
+    emailVerifyToken?: string;
+    emailVerifyTokenExpiresAt?: Date;
 }) {
     return await prisma.user.create({
         data: {
             name: data.name,
             email: data.email,
             password: data.password,
+            emailVerifyToken: data.emailVerifyToken,
+            emailVerifyTokenExpiresAt: data.emailVerifyTokenExpiresAt,
+        },
+    });
+}
+
+// Busca usuário ativo pelo token de verificação de email
+export async function getUserByEmailVerifyToken(token: string) {
+    return await prisma.user.findFirst({
+        where: {
+            emailVerifyToken: token,
+            deletedAt: null,
+        },
+    });
+}
+
+// Marca email como verificado
+export async function verifyUserEmail(id: string) {
+    return await prisma.user.update({
+        where: { id },
+        data: {
+            isEmailVerified: true,
+            emailVerifyToken: null,
+            emailVerifyTokenExpiresAt: null,
+        },
+    });
+}
+
+// Define novo token de verificação de email
+export async function setEmailVerifyToken(id: string, token: string, expiresAt: Date) {
+    return await prisma.user.update({
+        where: { id },
+        data: {
+            emailVerifyToken: token,
+            emailVerifyTokenExpiresAt: expiresAt,
         },
     });
 }
@@ -50,39 +83,112 @@ export async function updateUser(
 
 // Soft delete do usuário pelo ID
 export async function softDeleteUser(id: string) {
+    const timestamp = new Date();
     return await prisma.user.update({
         where: { id },
-        data: { deletedAt: new Date() },
+        data: {
+            deletedAt: timestamp,
+            email: `${id}@deleted.local`,
+            emailVerifyToken: null,
+            emailVerifyTokenExpiresAt: null,
+        },
     });
 }
 
 // Cria um refresh token para o usuário
 export async function createRefreshToken(data: {
-    token: string;
+    tokenHash: string;
+    tokenFamily: string;
     userId: string;
     expiresAt: Date;
 }) {
     return await prisma.refreshToken.create({
         data: {
-            token: data.token,
+            tokenHash: data.tokenHash,
+            tokenFamily: data.tokenFamily,
             userId: data.userId,
             expiresAt: data.expiresAt,
         },
     });
 }
 
-// Busca refresh token incluindo o usuário
-export async function findRefreshToken(token: string) {
-    return await prisma.refreshToken.findUnique({
-        where: { token },
+// Busca refresh token não expirado pelo hash incluindo o usuário
+export async function findRefreshToken(tokenHash: string) {
+    return await prisma.refreshToken.findFirst({
+        where: {
+            tokenHash,
+            expiresAt: { gt: new Date() },
+        },
         include: { user: true },
     });
 }
 
+// Busca tokens de mesma family de um usuário para detectar roubo
+export async function findRefreshTokensByFamily(userId: string, tokenFamily: string) {
+    return await prisma.refreshToken.findMany({
+        where: { userId, tokenFamily },
+        orderBy: { createdAt: 'desc' },
+    });
+}
+
+// Roda a rotação atômica de refresh token: deleta o antigo e cria o novo
+export async function rotateRefreshToken(data: {
+    oldTokenHash: string;
+    newTokenHash: string;
+    tokenFamily: string;
+    userId: string;
+    expiresAt: Date;
+}) {
+    return await prisma.$transaction(async (tx) => {
+        await tx.refreshToken.deleteMany({
+            where: { tokenHash: data.oldTokenHash },
+        });
+
+        return await tx.refreshToken.create({
+            data: {
+                tokenHash: data.newTokenHash,
+                tokenFamily: data.tokenFamily,
+                userId: data.userId,
+                expiresAt: data.expiresAt,
+            },
+        });
+    });
+}
+
 // Remove refresh token (logout)
-export async function deleteRefreshToken(token: string) {
+export async function deleteRefreshToken(tokenHash: string) {
     return await prisma.refreshToken.deleteMany({
-        where: { token },
+        where: { tokenHash },
+    });
+}
+
+// Remove todos os refresh tokens de um usuário
+export async function deleteAllUserRefreshTokens(userId: string) {
+    return await prisma.refreshToken.deleteMany({
+        where: { userId },
+    });
+}
+
+// Remove todos os refresh tokens expirados
+export async function deleteExpiredRefreshTokens() {
+    return await prisma.refreshToken.deleteMany({
+        where: { expiresAt: { lt: new Date() } },
+    });
+}
+
+// Lista refresh tokens ativos de um usuário
+export async function listUserRefreshTokens(userId: string) {
+    return await prisma.refreshToken.findMany({
+        where: {
+            userId,
+            expiresAt: { gt: new Date() },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: {
+            id: true,
+            createdAt: true,
+            expiresAt: true,
+        },
     });
 }
 
@@ -90,9 +196,17 @@ export const authRepository = {
     getUserByEmail,
     getUserById,
     createUser,
+    getUserByEmailVerifyToken,
+    verifyUserEmail,
+    setEmailVerifyToken,
     updateUser,
     softDeleteUser,
     createRefreshToken,
     findRefreshToken,
+    findRefreshTokensByFamily,
+    rotateRefreshToken,
     deleteRefreshToken,
+    deleteAllUserRefreshTokens,
+    deleteExpiredRefreshTokens,
+    listUserRefreshTokens,
 };
