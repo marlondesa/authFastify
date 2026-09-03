@@ -1,48 +1,133 @@
-import { fastify } from 'fastify';
+import 'dotenv/config';
+import { fastify, type FastifyRequest, type FastifyReply, type FastifyError } from 'fastify';
 import { fastifyCors } from '@fastify/cors';
+import { fastifyJwt } from '@fastify/jwt';
 import { fastifySwagger } from '@fastify/swagger';
 import { fastifySwaggerUi } from '@fastify/swagger-ui';
-import { validatorCompiler, serializerCompiler } from 'fastify-type-provider-zod';
+import { fastifyRateLimit } from '@fastify/rate-limit';
+import { validatorCompiler, serializerCompiler, jsonSchemaTransform } from 'fastify-type-provider-zod';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { authRoutes } from './auth/auth.routes.js';
+import { authService } from './auth/auth.service.js';
 
-const app = fastify();
+const app = fastify().withTypeProvider<ZodTypeProvider>();
+
+// Injeta a instância do Fastify no serviço de autenticação para gerar JWT
+authService.setFastifyInstance(app);
 
 app.setValidatorCompiler(validatorCompiler);
 app.setSerializerCompiler(serializerCompiler);
 
-app.register(fastifyCors, { origin: '*' });
+// CORS restrito para origens definidas em ALLOWED_ORIGINS
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map((o) => o.trim()) || ['http://localhost:3000'];
+app.register(fastifyCors, {
+    origin: allowedOrigins,
+    credentials: true,
+});
 
-app.register(fastifySwagger, {
-  openapi: {
-    info: {
-      title: 'Fastfy API',
-      version: '1.0.0',
+// Rate limiting global com limite mais restrito no login
+app.register(fastifyRateLimit, {
+    max: 100,
+    timeWindow: '1 minute',
+});
+
+// Configuração do JWT para autenticação
+app.register(fastifyJwt, {
+    secret: process.env.JWT_SECRET || 'fallback_secret_key',
+    cookie: {
+        cookieName: 'token',
+        signed: false,
     },
-  },
 });
 
-// Aqui salvamos os endpoints da nossa aplicação, e o
-// fastifySwaggerUi é o que vai gerar a documentação da nossa API
-app.register(fastifySwaggerUi, {
-  routePrefix: '/docs',
+// Tipa o payload do JWT no request
+declare module '@fastify/jwt' {
+    interface FastifyJWT {
+        user: {
+            id: string;
+            email: string;
+        };
+    }
+}
+
+declare module 'fastify' {
+    interface FastifyInstance {
+        authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    }
+}
+
+app.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+        await request.jwtVerify();
+    } catch (err) {
+        reply.status(401).send({ message: 'Não autorizado' });
+    }
 });
 
+// Tratamento global de erros
+app.setErrorHandler((error: FastifyError, _request, reply) => {
+    if (error.message.includes('Não autorizado')) {
+        return reply.status(401).send({ message: 'Não autorizado' });
+    }
+
+    if (
+        error.message.includes('não encontrado') ||
+        error.message.includes('não existe') ||
+        error.message.includes('incorreta') ||
+        error.message.includes('já está em uso') ||
+        error.message.includes('inválido ou expirado')
+    ) {
+        return reply.status(400).send({ message: error.message });
+    }
+
+    if (error.validation) {
+        return reply.status(400).send({ message: 'Dados inválidos', errors: error.validation });
+    }
+
+    console.error(error);
+    return reply.status(500).send({ message: 'Erro interno do servidor' });
+});
+
+// Configuração do Swagger para documentação da API
+app.register(fastifySwagger, {
+    openapi: {
+        info: {
+            title: 'Fastfy API',
+            version: '1.0.0',
+        },
+        components: {
+            securitySchemes: {
+                bearerAuth: {
+                    type: 'http',
+                    scheme: 'bearer',
+                    bearerFormat: 'JWT',
+                },
+            },
+        },
+    },
+    transform: jsonSchemaTransform,
+});
+
+// Registrar as rotas de autenticação
 app.register(authRoutes, { prefix: '/api' });
 
 
-
-
-
-
-//So para testar se o servidor está funcionando, podemos criar uma rota simples
+// Rota de teste para verificar se o servidor está funcionando
 app.get('/', () => {
-  return 'Hello World';
+    return 'Hello World';
 });
 
+// Configuração do Swagger UI para visualização da documentação
+app.register(fastifySwaggerUi, {
+    routePrefix: '/docs',
+});
+
+// Iniciar o servidor na porta definida em PORT ou 3333
+const port = Number(process.env.PORT) || 3333;
 app.listen({
-  port: 3333,
+    port,
 }).then(() => {
-  console.log('HTTP server running!');
+    console.log(`HTTP server running on port ${port}!`);
 });
 
 export default app;
